@@ -16,13 +16,10 @@ impl<T> Node<T> {
             *item = MaybeUninit::new(None)
         }
 
-        let items = unsafe { std::mem::transmute(items) };
-        // let mut uninit: MaybeUninit<[Option<Box<Node<T>>>; 256]> = MaybeUninit::uninit();
-
         Node {
             prefix: Vec::new(),
             val: None,
-            items,
+            items: unsafe { std::mem::transmute(items) },
         }
     }
 
