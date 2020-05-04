@@ -308,10 +308,7 @@ impl<T> Trie<T> {
                                 .filter_map(|(d, o)| o.map(|b| (d, b)))
                                 .take(2);
                             if let Some((branch, first_child)) = full_slots.next() {
-                                if full_slots.next().is_some() {
-                                    // it has 2 children, nothing left to do
-                                    break;
-                                } else {
+                                if full_slots.next().is_none() {
                                     // it has only 1 child, compress the trie
                                     // swap the prefix out - we'll be extending it and putting it back in place
                                     let mut prefix = std::mem::take(&mut node.prefix);
@@ -330,8 +327,9 @@ impl<T> Trie<T> {
                                     node.val = child_val;
                                     node.slots = child_slots;
                                 }
+                                break;
                             } else {
-                                // this node is a leaf, delete it
+                                // this node is now an empty leaf, delete it
                                 nkey.remove(&mut self.node_slab);
                             }
                         }
