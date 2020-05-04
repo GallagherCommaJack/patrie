@@ -2,10 +2,21 @@ use slab::Slab;
 use smallvec::SmallVec;
 use std::num::NonZeroUsize;
 
+#[derive(Debug)]
 pub struct Trie<T> {
     node_slab: Slab<Node>,
     item_slab: Slab<T>,
     root: Node,
+}
+
+impl<T> Trie<T> {
+    pub fn new() -> Self {
+        Self {
+            node_slab: Slab::new(),
+            item_slab: Slab::new(),
+            root: Node::new(),
+        }
+    }
 }
 
 mod keys {
@@ -73,6 +84,16 @@ struct Node {
     slots: [Option<NodeKey>; 256],
 }
 
+impl std::fmt::Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "Node {{ prefix: {:?}, val: {:?}, slots: {:?} }}",
+            self.prefix, self.val, &self.slots as &[Option<NodeKey>]
+        )
+    }
+}
+
 impl Node {
     fn new() -> Self {
         Node {
@@ -111,10 +132,13 @@ impl<T> Trie<T> {
         let mut curr = &self.root;
         let mut rest = key;
 
+        // dbg!(key);
         loop {
             let pref = curr.prefix.as_slice();
             let shared_len = shared_len(pref, rest);
             let (shared, suff) = rest.split_at(shared_len);
+            rest = suff;
+            // dbg!(pref, shared, suff);
 
             if !suff.is_empty() && pref.len() == shared.len() {
                 debug_assert!(pref == shared);
@@ -149,6 +173,7 @@ impl<T> Trie<T> {
             let ix = curr.val?;
             Some(ix.get(&self.item_slab))
         } else {
+            // dbg!(rest, shared, curr);
             None
         }
     }
@@ -173,7 +198,14 @@ impl<T> Trie<T> {
             shared, rest, curr, ..
         } = walked;
 
-        if shared.len() == curr.prefix.len() {
+        // dbg!(key, shared, &curr.prefix, rest);
+
+        if curr.is_leaf() && curr.val.is_none() {
+            debug_assert!(last_ix.is_none(), "only root node should be empty");
+            self.root.prefix = rest.into();
+            self.root.val = Some(ItemKey::insert(&mut self.item_slab, val));
+            return None;
+        } else if shared.len() == curr.prefix.len() {
             // no need to split curr
             if let Some((d, suff)) = rest.split_first() {
                 debug_assert!(curr.slots[*d as usize].is_none());
@@ -270,7 +302,10 @@ impl<T> Trie<T> {
         }
     }
 
-    pub fn remove(&mut self, key: &[u8]) -> Option<T> {
+    pub fn remove(&mut self, key: &[u8]) -> Option<T>
+    where
+        T: std::fmt::Debug,
+    {
         let WalkTo {
             shared,
             rest,
@@ -340,6 +375,8 @@ impl<T> Trie<T> {
                     }
                 }
             }
+        } else {
+            self.root.val = None;
         }
 
         Some(vix.remove(&mut self.item_slab))

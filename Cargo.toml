@@ -9,3 +9,7 @@ description = "a trie which skips single-child nodes"
 [dependencies]
 smallvec = "1.4.0"
 slab = "0.4.2"
+
+[dev-dependencies]
+proptest = "0.9.6"
+proptest-derive = "0.1.2"
