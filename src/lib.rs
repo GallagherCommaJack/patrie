@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use slab::Slab;
 use smallvec::SmallVec;
 use std::num::NonZeroUsize;
@@ -87,35 +85,29 @@ impl Node {
     fn is_leaf(&self) -> bool {
         self.slots.iter().all(|o| o.is_none())
     }
-
-    fn is_empty(&self) -> bool {
-        self.val.is_none() && self.is_leaf()
-    }
-}
-
-struct BreadCrumb<'a> {
-    node: &'a Node,
-    branch: u8,
 }
 
 struct WalkTo<'a, 'b> {
     curr: &'a Node,
-    trail: Vec<BreadCrumb<'a>>,
+    // keys[i].slots[branches[i+1]] = keys[i+1]
+    // root.slots[branches[0]] = keys[0]
+    trail_keys: Vec<NodeKey>,
+    trail_branches: Vec<u8>,
     shared: &'b [u8],
     rest: &'b [u8],
 }
 
 impl<'a, 'b> WalkTo<'a, 'b> {
     fn last_key(&self) -> Option<NodeKey> {
-        let last = self.trail.last()?;
-        last.node.slots[last.branch as usize]
+        Some(*self.trail_keys.last()?)
     }
 }
 
 impl<T> Trie<T> {
     #[inline]
     fn walk_to<'a, 'b>(&'a self, key: &'b [u8]) -> WalkTo<'a, 'b> {
-        let mut trail = Vec::with_capacity(key.len());
+        let mut trail_keys = Vec::with_capacity(key.len());
+        let mut trail_branches = Vec::with_capacity(key.len());
         let mut curr = &self.root;
         let mut rest = key;
 
@@ -127,12 +119,10 @@ impl<T> Trie<T> {
             if !suff.is_empty() && pref.len() == shared.len() {
                 debug_assert!(pref == shared);
 
+                trail_branches.push(suff[0]);
                 if let Some(ix) = curr.slots[suff[0] as usize] {
                     // recurse
-                    trail.push(BreadCrumb {
-                        node: curr,
-                        branch: suff[0],
-                    });
+                    trail_keys.push(ix);
                     curr = ix.get(&self.node_slab);
                     rest = &suff[1..];
                     continue;
@@ -142,7 +132,8 @@ impl<T> Trie<T> {
             // dead end
             return WalkTo {
                 curr,
-                trail,
+                trail_keys,
+                trail_branches,
                 shared,
                 rest,
             };
@@ -277,6 +268,83 @@ impl<T> Trie<T> {
 
             None
         }
+    }
+
+    pub fn remove(&mut self, key: &[u8]) -> Option<T> {
+        let WalkTo {
+            shared,
+            rest,
+            curr,
+            mut trail_keys,
+            mut trail_branches,
+        } = self.walk_to(key);
+
+        if !rest.is_empty() || shared.len() != curr.prefix.len() || curr.val.is_none() {
+            return None;
+        }
+
+        let vix = curr.val.unwrap();
+
+        // we have to propagate the deletion
+        // but only if there was a node to delete
+        if let Some(last_key) = trail_keys.pop() {
+            // if it's not a leaf there's nothing to delete
+            if curr.is_leaf() {
+                last_key.remove(&mut self.node_slab);
+
+                while let Some(branch) = trail_branches.pop() {
+                    if let Some(nkey) = trail_keys.pop() {
+                        let node = nkey.get_mut(&mut self.node_slab);
+                        let old = node.slots[branch as usize].take();
+                        debug_assert!(old.is_some());
+                        if node.val.is_some() {
+                            // there's a value here, nothing left to delete
+                            break;
+                        } else {
+                            let mut full_slots = node
+                                .slots
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(d, o)| o.map(|b| (d, b)))
+                                .take(2);
+                            if let Some((branch, first_child)) = full_slots.next() {
+                                if full_slots.next().is_some() {
+                                    // it has 2 children, nothing left to do
+                                    break;
+                                } else {
+                                    // it has only 1 child, compress the trie
+                                    // swap the prefix out - we'll be extending it and putting it back in place
+                                    let mut prefix = std::mem::take(&mut node.prefix);
+                                    prefix.push(branch as u8);
+
+                                    let Node {
+                                        prefix: child_prefix,
+                                        val: child_val,
+                                        slots: child_slots,
+                                    } = first_child.remove(&mut self.node_slab);
+
+                                    prefix.extend_from_slice(&child_prefix);
+
+                                    let node = nkey.get_mut(&mut self.node_slab);
+                                    node.prefix = prefix;
+                                    node.val = child_val;
+                                    node.slots = child_slots;
+                                }
+                            } else {
+                                // this node is a leaf, delete it
+                                nkey.remove(&mut self.node_slab);
+                            }
+                        }
+                    } else {
+                        let old = self.root.slots[branch as usize].take();
+                        debug_assert!(old.is_some());
+                        assert!(trail_branches.pop().is_none());
+                    }
+                }
+            }
+        }
+
+        Some(vix.remove(&mut self.item_slab))
     }
 }
 
