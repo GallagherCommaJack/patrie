@@ -53,7 +53,7 @@ impl Models {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(10_000))]
+    #![proptest_config(ProptestConfig::with_cases(100_000))]
     #[test]
     fn always_equiv(ops: Vec<TableOp>) {
         let mut model = Models::new();

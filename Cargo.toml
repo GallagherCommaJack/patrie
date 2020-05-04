@@ -13,3 +13,9 @@ slab = "0.4.2"
 [dev-dependencies]
 proptest = "0.9.6"
 proptest-derive = "0.1.2"
+
+# do some optimization in test mode
+# either of these on their own are not that helpful, but put together they 10x our test speed
+[profile.test]
+opt-level = 3 
+lto = "thin" 
